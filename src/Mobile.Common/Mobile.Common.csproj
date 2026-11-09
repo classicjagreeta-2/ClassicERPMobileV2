@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Mobile.Common</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Oracle.ManagedDataAccess.Core" Version="23.7.0" />
+  </ItemGroup>
+</Project>

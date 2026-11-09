@@ -1,0 +1,9 @@
+@echo off
+rem API 2 (Mobile.DataApi) on the 64 server, port 92. Copy this file to Start-API2-DataApi.cmd and fill in the value.
+rem PRIVATE once filled in: it holds the config key - never commit it.
+rem API 2 needs no database login: the sealed config from API 1 carries the client's login.
+set DataApi__ConfigKey=<the same text as Gateway__ConfigKey on API 1>
+set DataApi__EnableSwagger=false
+cd /d "%~dp0DataApi"
+.\Mobile.DataApi.exe --urls http://0.0.0.0:92
+pause

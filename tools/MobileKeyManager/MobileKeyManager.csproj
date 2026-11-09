@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>MobileKeyManager</AssemblyName>
+    <RootNamespace>MobileKeyManager</RootNamespace>
+    <Product>Mobile Key Manager - ClassicERP Mobile</Product>
+    <Version>1.1.0</Version>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Mobile.Common\Mobile.Common.csproj" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+    <!-- the script that creates the master setup table inside a client's own database -->
+    <EmbeddedResource Include="..\..\sql\03_client_mobile_master_config.sql" LogicalName="client_master_config.sql" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,17 @@
+{
+  "profiles": {
+    "Mobile.Gateway": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "launchUrl": "swagger",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "Gateway__ConnectionString": "User Id=CLASSICNEW;Password=<password>;Data Source=//103.234.116.64:1521/CLASSICDEV",
+        "Gateway__ConfigKey": "<32+ random characters, the same text as DataApi__ConfigKey>",
+        "Gateway__DbPasswordKey": "<32+ random characters, the same text as MobileKeyManager's Encryption key>",
+        "Gateway__EnableSwagger": "true"
+      },
+      "applicationUrl": "http://localhost:5090"
+    }
+  }
+}

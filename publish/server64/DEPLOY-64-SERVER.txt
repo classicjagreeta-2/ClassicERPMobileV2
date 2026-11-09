@@ -1,0 +1,16 @@
+DEPLOYING THE NEW APIs ON THE 64 SERVER (103.234.116.64)
+=========================================================
+The old mobile API stays on port 90 and is NOT touched.
+  API 1 (Mobile.Gateway)  ->  port 91   http://103.234.116.64:91/
+  API 2 (Mobile.DataApi)  ->  port 92   http://103.234.116.64:92/   (this is the address saved in MOBILE_CONTROL for the companies)
+
+1. Install the .NET 8 ASP.NET Core Runtime (Hosting Bundle) on the server if it is not there:  dotnet --list-runtimes  must show Microsoft.AspNetCore.App 8.x
+2. Copy this whole folder (Gateway, DataApi, the two .cmd files) to the server, e.g. C:\ClassicMobileV2\
+3. Open the firewall for the two ports (run as Administrator):
+     netsh advfirewall firewall add rule name="ClassicMobile API 1" dir=in action=allow protocol=TCP localport=91
+     netsh advfirewall firewall add rule name="ClassicMobile API 2" dir=in action=allow protocol=TCP localport=92
+   (also open them in the router / cloud firewall if the phones come from outside)
+4. Double-click Start-API1-Gateway.cmd and Start-API2-DataApi.cmd. Each opens a window; closing it stops that API.
+5. Check from any PC:   http://103.234.116.64:91/health   and   http://103.234.116.64:92/health   -> {"status":"ok",...}
+6. For a permanent setup run each as a Windows service (e.g. NSSM) or an IIS site, with the same environment variables as in the .cmd files.
+7. The two .cmd files contain the database password and keys: keep them on the server only.

@@ -1,0 +1,28 @@
+# Build output
+bin/
+obj/
+*.pdb
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.slnLaunch.user
+
+# Published programs (rebuild with dotnet publish) - and anything in them that holds real passwords or keys
+publish/Gateway/
+publish/DataApi/
+publish/MobileKeyManager/
+publish/server64/Gateway/
+publish/server64/DataApi/
+publish/server64/Start-API1-Gateway.cmd
+publish/server64/Start-API2-DataApi.cmd
+
+# Local settings with real passwords and keys: copy launchSettings.sample.json to launchSettings.json and fill it in
+src/Mobile.Gateway/Properties/launchSettings.json
+src/Mobile.DataApi/Properties/launchSettings.json
+
+# Local secrets of any kind
+*.local.json
+*.secrets.json
+appsettings.Production.json
