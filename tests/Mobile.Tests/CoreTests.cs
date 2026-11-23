@@ -79,10 +79,21 @@ public class CoreTests
     {
         Assert.Contains(Imp("""{"rectype":"3","transdate":"2026-09-29","ecode":"1"}""", out _), e => e.StartsWith("app_record_id"));
         Assert.Contains(Imp("""{"rectype":"3","transdate":"29/09/2026","ecode":"1","app_record_id":"a"}""", out _), e => e.StartsWith("transdate"));
-        Assert.Contains(Imp("""{"rectype":"3","transdate":"2026-09-29","ecode":"1","app_record_id":"a","hazira_code":"ZZ"}""", out _), e => e.StartsWith("hazira_code"));
+        Assert.Contains(Imp("""{"rectype":"3","transdate":"2026-09-29","ecode":"1","app_record_id":"a","hazira_code":"ABC"}""", out _), e => e.StartsWith("hazira_code"));
         Assert.Contains(Imp("""{"rectype":"3","transdate":"2026-09-29","ecode":"1","app_record_id":"a","time1":"25:00"}""", out _), e => e.StartsWith("time1"));
         Assert.Contains(Imp("""{"rectype":"3","transdate":"2026-09-29","ecode":"1","app_record_id":"a","evil":"x"}""", out _), e => e.StartsWith("evil"));
         Assert.Contains(Imp("""{"rectype":"3","transdate":"2026-09-29","ecode":"1","app_record_id":"a","h":"1.5"}""", out _), e => e.StartsWith("h:"));
+    }
+
+    [Fact] public void ImportEye_any_hazira_type_in_the_master_is_accepted()
+    {
+        Assert.Empty(Imp("""{"rectype":"3","transdate":"2026-11-14","ecode":"1","app_record_id":"a","hazira_code":"c1"}""", out var c1));
+        Assert.Equal("C1", c1["HAZIRA_CODE"]);   // stored upper-case
+        Imp("""{"rectype":"3","transdate":"2026-11-14","ecode":"1","app_record_id":"b","hazira_code":"ZZ"}""", out var zz);
+        Imp("""{"rectype":"3","transdate":"2026-11-14","ecode":"1","app_record_id":"c"}""", out var none);
+        var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "N1", "E1", "O1", "C1", "B" };
+        var bad = ImportEyeParser.UnknownHaziraCodes(new[] { c1, zz, none }, known);
+        Assert.Equal(2, Assert.Single(bad).Row);   // only ZZ; C1 accepted, row without a code not checked
     }
 
     static ControlRow Good() => new()

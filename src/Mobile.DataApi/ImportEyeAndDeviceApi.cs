@@ -47,6 +47,18 @@ public static class ImportEyeApi
 
             var table = ctx.Table(item);
             using var con = open(ctx.Row); await con.OpenAsync(ct);
+            if (ctx.Item("hazira-type") is { Op: OpType.Read } ht && rows.Any(r => r.ContainsKey("HAZIRA_CODE")))
+            {
+                // hazira_code must be one of this customer's Hazira Types (same rows the app downloads: LOCA / UNIT / DOC_YEAR in MVC)
+                var q = MasterQuery.BuildSelect(ht, ctx.Row);
+                using var hc = con.CreateCommand(); hc.BindByName = true; hc.CommandText = q.Sql;
+                foreach (var (k, v) in q.Binds) hc.Parameters.Add(k, OracleDbType.Varchar2).Value = v ?? DBNull.Value;
+                var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                using (var rd = await hc.ExecuteReaderAsync(ct)) while (await rd.ReadAsync(ct)) if (!rd.IsDBNull(0)) known.Add(rd.GetValue(0).ToString()!.Trim());
+                var bad = ImportEyeParser.UnknownHaziraCodes(rows, known);
+                if (bad.Count > 0)
+                    return Results.Json(new { success = false, message = "Nothing was saved. Fix the rows listed.", errors = bad.Select(b => new { row = b.Row, errors = new[] { b.Error } }) }, statusCode: 400);
+            }
             using var tx = con.BeginTransaction();
             var ids = new List<long>(); var dups = new List<int>();
             try

@@ -31,7 +31,6 @@ public static class ImportEyeParser
     };
 
     static readonly HashSet<string> Required = new() { "rectype", "transdate", "ecode", "app_record_id" };
-    static readonly string[] HaziraCodes = { "N1", "E1", "O1" };
     static readonly Regex TimeRx = new(@"^([01]?\d|2[0-3]):[0-5]\d$", RegexOptions.Compiled);
     static readonly string[] DateFormats = { "yyyy-MM-dd", "yyyy-MM-dd'T'HH:mm:ss", "dd-MMM-yyyy", "dd-MMM-yy HH:mm:ss" };
 
@@ -58,8 +57,7 @@ public static class ImportEyeParser
             {
                 case Kind.Text:
                     if (text.Length > c.Size) errors.Add($"{c.Json}: up to {c.Size} characters.");
-                    else if (c.Json == "hazira_code" && !HaziraCodes.Contains(text)) errors.Add("hazira_code: use N1, E1 or O1.");
-                    else values[c.Column] = text;
+                    else values[c.Column] = c.Json == "hazira_code" ? text.ToUpperInvariant() : text;   // hazira_code is checked against the Hazira Type master by the caller
                     break;
                 case Kind.Time:
                     if (!TimeRx.IsMatch(text) || text.Length > c.Size) errors.Add($"{c.Json}: use HH:mm.");
@@ -80,5 +78,16 @@ public static class ImportEyeParser
         }
         if (!string.IsNullOrEmpty(forceMcid)) values["MCID"] = forceMcid;
         return errors;
+    }
+
+    // Rows whose hazira_code is not one of the customer's Hazira Types (M_HAZIRATYPE codes, as the app downloads them).
+    // Returns (1-based row number, error) for each; rows without a hazira_code are not checked.
+    public static List<(int Row, string Error)> UnknownHaziraCodes(IReadOnlyList<Dictionary<string, object?>> rows, ISet<string> known)
+    {
+        var bad = new List<(int, string)>();
+        for (var i = 0; i < rows.Count; i++)
+            if (rows[i].TryGetValue("HAZIRA_CODE", out var v) && v is string code && !known.Contains(code))
+                bad.Add((i + 1, $"hazira_code: {code} is not in the Hazira Type master."));
+        return bad;
     }
 }
