@@ -62,10 +62,12 @@ public static class SecretBox
     }
 }
 
-// Everything API 2 needs to serve one company, including its database login. Sealed (encrypted + signed) by API 1; the phone only carries it.
+// The access token API 1 issues and the phone sends to API 2 (Authorization: Bearer). It says WHO the phone is serving (company, mode,
+// LOCA/UNIT, schema, expiry) and holds NO database connection: no host, port, service, user or password. API 2 connects with the database
+// login in its own settings. Sealed (encrypted + signed) so the phone cannot read or change it.
 public class ClientConfig
 {
-    public int V { get; set; } = 2;
+    public int V { get; set; } = 3;
     public long CtrlId { get; set; }
     public string Company { get; set; } = "";
     public string Mode { get; set; } = "VB";          // VB / MVC
@@ -73,13 +75,7 @@ public class ClientConfig
     public string? Unit { get; set; }
     public string? MainUnit { get; set; }
     public string? DocYear { get; set; }
-    public string DbHost { get; set; } = "";
-    public int DbPort { get; set; } = 1521;
-    public string DbService { get; set; } = "";
-    public string Schema { get; set; } = "";
-    public string DbUser { get; set; } = "";
-    public string DbPassword { get; set; } = "";
-    public string ConfigTable { get; set; } = "MOBILE_MASTER_CONFIG";   // the master setup table inside the client's own database
+    public string Schema { get; set; } = "";          // the company's schema inside API 2's database (not a connection)
     public DateTime? ValidFrom { get; set; }
     public DateTime? ValidTo { get; set; }
     public long Iat { get; set; }
@@ -88,28 +84,27 @@ public class ClientConfig
     public ControlRow ToControlRow() => new()
     {
         CtrlId = CtrlId, ClientName = Company, Loca = Loca, Unit = string.IsNullOrWhiteSpace(Unit) ? null : Unit, MainUnit = MainUnit, DocYear = DocYear,
-        IpAddress = DbHost, DatabasePort = DbPort, DatabaseName = DbService, SchemaName = Schema, DbHost = DbHost, DbUser = DbUser, DbPassword = DbPassword,
-        ConfigTable = ConfigTable, Active = true, ActiveDate = ValidFrom, Validity = ValidTo
+        SchemaName = Schema, ConfigTable = "MOBILE_MASTER_CONFIG", Active = true, ActiveDate = ValidFrom, Validity = ValidTo
     };
 }
 
 public class ConfigSealer
 {
-    const string Purpose = "mobile-config-v2";
+    const string Purpose = "mobile-config-v3";
     readonly string _secret;
     public ConfigSealer(string secret) { Gcm.Key(secret); _secret = secret; }   // fails early on a short key
 
-    public string Seal(ClientConfig c) => "c2." + Gcm.Seal(_secret, Purpose, JsonSerializer.SerializeToUtf8Bytes(c));
+    public string Seal(ClientConfig c) => "c3." + Gcm.Seal(_secret, Purpose, JsonSerializer.SerializeToUtf8Bytes(c));
 
     // (config, null) when valid; (null, reason) when not: "invalid" (not made by API 1 / changed) or "expired"
     public (ClientConfig? Config, string? Problem) Open(string? blob, DateTimeOffset? now = null)
     {
-        if (string.IsNullOrEmpty(blob) || blob.Length > 8192 || !blob.StartsWith("c2.")) return (null, "invalid");
+        if (string.IsNullOrEmpty(blob) || blob.Length > 8192 || !blob.StartsWith("c3.")) return (null, "invalid");
         var plain = Gcm.Open(_secret, Purpose, blob[3..]);
         if (plain == null) return (null, "invalid");
         ClientConfig? c;
         try { c = JsonSerializer.Deserialize<ClientConfig>(plain); } catch (JsonException) { return (null, "invalid"); }
-        if (c == null || c.V != 2) return (null, "invalid");
+        if (c == null || c.V != 3) return (null, "invalid");
         if (c.Exp < (now ?? DateTimeOffset.UtcNow).ToUnixTimeSeconds()) return (null, "expired");
         return (c, null);
     }

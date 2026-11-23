@@ -158,19 +158,21 @@ public class CoreTests
 
     static ClientConfig Cfg(DateTimeOffset exp) => new()
     {
-        CtrlId = 3, Company = "Classic Dev", Mode = "VB", Loca = "BTL", DbHost = "10.0.0.5", DbPort = 1521, DbService = "CLASSICDEV", Schema = "PAY_BATE_NOR2027",
-        DbUser = "CLASSICNEW", DbPassword = "S3cret!pw;with=odd chars", Iat = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), Exp = exp.ToUnixTimeSeconds()
+        CtrlId = 3, Company = "Classic Dev", Mode = "VB", Loca = "BTL", Schema = "PAY_BATE_NOR2027",
+        Iat = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), Exp = exp.ToUnixTimeSeconds()
     };
 
-    [Fact] public void Sealed_config_opens_with_the_same_key_and_hides_the_password()
+    [Fact] public void Sealed_token_opens_with_the_same_key_and_holds_no_database_login()
     {
         var s = new ConfigSealer(K1);
         var blob = s.Seal(Cfg(DateTimeOffset.UtcNow.AddDays(10)));
-        Assert.StartsWith("c2.", blob);
-        Assert.DoesNotContain("CLASSICNEW", blob); Assert.DoesNotContain("S3cret", blob); Assert.DoesNotContain("PAY_BATE", blob);   // nothing readable on the phone
+        Assert.StartsWith("c3.", blob);
+        Assert.DoesNotContain("PAY_BATE", blob); Assert.DoesNotContain("BTL", blob);   // nothing readable on the phone
         var (c, problem) = s.Open(blob);
-        Assert.Null(problem); Assert.Equal("S3cret!pw;with=odd chars", c!.DbPassword); Assert.Equal("PAY_BATE_NOR2027", c.Schema);
-        var row = c.ToControlRow(); Assert.Equal(AppMode.VB, row.Mode); Assert.Equal("CLASSICNEW", row.DbUser); Assert.Equal("10.0.0.5", row.DbHost);
+        Assert.Null(problem); Assert.Equal("PAY_BATE_NOR2027", c!.Schema);
+        var row = c.ToControlRow(); Assert.Equal(AppMode.VB, row.Mode); Assert.Equal("PAY_BATE_NOR2027", row.SchemaName);
+        Assert.Null(row.DbUser); Assert.Null(row.DbPassword); Assert.Null(row.DbHost);   // the connection comes from API 2's own settings
+        Assert.Equal("invalid", s.Open("c2." + blob[3..]).Problem);   // a token from the old design is refused: the app signs in again
     }
 
     [Fact] public void Sealed_config_rejects_wrong_key_tampering_and_expiry()

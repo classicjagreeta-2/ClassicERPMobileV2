@@ -7,19 +7,28 @@ using Mobile.Common;
 using Mobile.DataApi;
 using Oracle.ManagedDataAccess.Client;
 
-// API 2 - runs on each client server (the IP:Hosted_port the phone was given). It has NO central database and NO per-client file:
-// every call carries the sealed config that API 1 issued (Authorization: Bearer <config>). API 2 opens it with the shared key, connects
-// straight to that company's own database with the login inside it, reads the master setup table of that database (MOBILE_MASTER_CONFIG)
-// and fetches the data it describes.
+// API 2 - runs on each client server (the IP:Hosted_port the phone was given). It has NO central database. Every call carries the
+// access token API 1 issued (Authorization: Bearer <token>): it says which company / mode / LOCA-UNIT / schema the phone serves, but holds
+// no database connection. API 2 connects to the client's database with the login in ITS OWN settings below, reads the master setup table
+// (MOBILE_MASTER_CONFIG) and fetches the data it describes.
 // Settings (environment variables preferred):
 //   DataApi__ConfigKey      the SAME key as Gateway__ConfigKey (>= 32 characters)
-//   DataApi__DbHost         optional: the Oracle host as seen from THIS server (e.g. localhost); default = the host inside the config
+//   DataApi__DbService      Oracle service name of the client database (required)
+//   DataApi__DbUser         database user (required);  DataApi__DbPassword  its password (required)
+//   DataApi__DbHost         Oracle host as seen from THIS server (default localhost);  DataApi__DbPort  (default 1521)
 //   DataApi__EnableSwagger  true | false
 var builder = WebApplication.CreateBuilder(args);
 builder.Host.UseWindowsService();   // runs as a Windows service when started by the service manager; an ordinary console program otherwise
 var cfg = builder.Configuration.GetSection("DataApi");
 var sealer = new ConfigSealer(cfg["ConfigKey"] ?? "");
-var dbHostOverride = cfg["DbHost"];
+string Need(string k) => string.IsNullOrWhiteSpace(cfg[k]) ? throw new InvalidOperationException($"DataApi:{k} is not set.") : cfg[k]!.Trim();
+var dbHost = string.IsNullOrWhiteSpace(cfg["DbHost"]) ? "localhost" : cfg["DbHost"]!.Trim();
+var dbService = Need("DbService");
+foreach (var (v, w) in new[] { (dbService, "DbService"), (dbHost, "DbHost") })
+    if (v.Any(ch => !(char.IsLetterOrDigit(ch) || ch is '.' or '_' or '-'))) throw new InvalidOperationException($"DataApi:{w} has illegal characters.");
+var dbPort = int.TryParse(cfg["DbPort"], out var p0) && p0 is > 0 and < 65536 ? p0 : 1521;
+var connString = new OracleConnectionStringBuilder
+{ UserID = Need("DbUser"), Password = Need("DbPassword"), DataSource = $"//{dbHost}:{dbPort}/{dbService}", ConnectionTimeout = 20 }.ConnectionString;
 builder.WebHost.ConfigureKestrel(k => { k.AddServerHeader = false; k.Limits.MaxRequestBodySize = 8 * 1024 * 1024; });
 // Swagger UI at /swagger; off unless DataApi__EnableSwagger=true (keep it off on a public server). "Authorize" takes the config from API 1.
 var swagger = string.Equals(cfg["EnableSwagger"], "true", StringComparison.OrdinalIgnoreCase);
@@ -39,16 +48,8 @@ var app = builder.Build();
 if (swagger) { app.UseSwagger(); app.UseSwaggerUI(); }
 var log = app.Logger;
 
-string ConnString(ControlRow c)
-{
-    // the Oracle host: DataApi__DbHost (this server's view) > the host inside the config
-    var host = string.IsNullOrWhiteSpace(dbHostOverride) ? (string.IsNullOrWhiteSpace(c.DbHost) ? c.IpAddress : c.DbHost) : dbHostOverride;
-    foreach (var (v, w) in new[] { (c.DatabaseName, "service"), (host, "host") })
-        if (string.IsNullOrWhiteSpace(v) || v.Any(ch => !(char.IsLetterOrDigit(ch) || ch is '.' or '_' or '-'))) throw new InvalidOperationException("Illegal " + w + " in the config");
-    return new OracleConnectionStringBuilder { UserID = c.DbUser, Password = c.DbPassword, DataSource = $"//{host}:{c.DatabasePort}/{c.DatabaseName}", ConnectionTimeout = 20 }.ConnectionString;
-}
-
-OracleConnection Open(ControlRow c) => new(ConnString(c));
+// every company served here uses this server's own database login (DataApi__Db* settings); the token only picks the schema / unit
+OracleConnection Open(ControlRow _) => new(connString);
 
 // a company's settings (from its sealed config) and its master list (read from ITS database) are cached for a minute
 var cache = new ConcurrentDictionary<string, (DateTime At, ControlRow Row, List<MasterItem> Items)>();
@@ -57,8 +58,8 @@ async Task<(ControlRow Row, List<MasterItem> Items)> Load(ClientConfig config, s
     var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(blob)));
     if (cache.TryGetValue(key, out var hit) && DateTime.UtcNow - hit.At < TimeSpan.FromSeconds(60)) return (hit.Row, hit.Items);
     var row = config.ToControlRow();
-    var table = string.IsNullOrWhiteSpace(config.ConfigTable) ? "MOBILE_MASTER_CONFIG" : config.ConfigTable;
-    var items = await new ControlRepository(ConnString(row), table)
+    var table = row.ConfigTable!;
+    var items = await new ControlRepository(connString, table)
         .LoadItems(row, onBad: b => log.LogError("{Table} row skipped for control {Id}: {Why}", table, config.CtrlId, b), ct: ct);
     if (cache.Count > 500) foreach (var old in cache.Where(k => DateTime.UtcNow - k.Value.At > TimeSpan.FromMinutes(5)).Select(k => k.Key).ToList()) cache.TryRemove(old, out _);
     cache[key] = (DateTime.UtcNow, row, items);
@@ -79,7 +80,8 @@ v1.AddEndpointFilter(async (ctx, next) =>
     var blob = auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? auth[7..].Trim() : null;
     var (config, problem) = sealer.Open(blob);
     if (config == null)
-        return Results.Json(new { success = false, message = problem == "expired"
+        // reason: "token-expired" = get a new token from API 1 silently and retry; "token-invalid" = sign in to API 1 again
+        return Results.Json(new { success = false, reason = problem == "expired" ? "token-expired" : "token-invalid", message = problem == "expired"
             ? "The saved configuration has expired. Get a new one from API 1."
             : "Not signed in. Send the configuration you got from API 1 as Authorization: Bearer <config>." }, statusCode: 401);
     ControlRow row; List<MasterItem> items;

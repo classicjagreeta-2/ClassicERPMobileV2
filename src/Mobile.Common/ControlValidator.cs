@@ -26,7 +26,7 @@ public static class ControlValidator
         if ((c.DocYear ?? "").Length > 10) e.Add("Doc year is up to 10 characters.");
         if ((c.ApiClients ?? "").Length > 100) e.Add("API clients is up to 100 characters.");
         if ((c.PhoneId ?? "").Trim().Length > 60) e.Add("Device ID is up to 60 characters.");
-        if (c.TokenMinutes != 0 && c.TokenMinutes is < 5 or > 60 * 24 * 31) e.Add("Config minutes: 0 (until the valid-until date) or 5-44640.");
+        if (c.TokenMinutes != 0 && c.TokenMinutes is < 5 or > 60 * 24 * 31) e.Add("Config minutes: 0 (API 1's maximum, Gateway__MaxTokenHours) or 5-44640.");
         if (!string.IsNullOrWhiteSpace(c.DbUser) && !Regex.IsMatch(c.DbUser.Trim(), @"^[A-Za-z0-9_$#.@-]{1,60}$")) e.Add("Database user: letters, digits and _ $ # . @ - only (up to 60).");
         if (!string.IsNullOrWhiteSpace(c.DbHost) && !Host.IsMatch(c.DbHost.Trim())) e.Add("Database host: letters, digits and . _ - only (blank = the API address).");
         if (c.ActiveDate != null && c.Validity != null && c.Validity.Value.Date < c.ActiveDate.Value.Date) e.Add("Valid-until date is before the active date.");
@@ -36,7 +36,6 @@ public static class ControlValidator
         if (c.Validity != null && c.Validity.Value.Date < DateTime.Today)
             w.Add("The valid-until date is in the past: this company cannot sign in.");
         if (!c.Active) w.Add("The company is saved as Inactive: it cannot sign in.");
-        if (string.IsNullOrWhiteSpace(c.DbUser)) w.Add("No database user is set: API 1 cannot issue this company's config until one is saved.");
         return (e, w);
     }
 }

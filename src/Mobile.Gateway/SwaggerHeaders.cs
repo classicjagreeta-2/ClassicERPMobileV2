@@ -13,8 +13,7 @@ public class ProvisionHeaders : IOperationFilter
         {
             ("x-username", "Company login (e.g. CORETEAM)"),
             ("x-password", "Company password"),
-            ("x-api-key", "Company API key (generated in MobileKeyManager)"),
-            ("x-device-id", "Any stable id of the phone, e.g. TEST1. A login is registered to the first device it signs in from.")
+            ("x-api-key", "Company API key (generated in MobileKeyManager)")
         })
             op.Parameters.Add(new OpenApiParameter { Name = name, In = ParameterLocation.Header, Required = true, Description = text, Schema = new OpenApiSchema { Type = "string" } });
         op.Summary = "Get a token (and the config for the phone) with the company login, password and API key";

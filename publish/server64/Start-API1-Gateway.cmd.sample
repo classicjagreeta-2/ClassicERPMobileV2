@@ -3,7 +3,7 @@ rem API 1 (Mobile.Gateway) on the 64 server, port 91. Copy this file to Start-AP
 rem PRIVATE once filled in: it holds the database password and keys - never commit it.
 set Gateway__ConnectionString=User Id=CLASSICNEW;Password=<password>;Data Source=//103.234.116.64:1521/CLASSICDEV
 set Gateway__ConfigKey=<32+ random characters, the same text as on API 2>
-set Gateway__DbPasswordKey=<32+ random characters, the same as MobileKeyManager's Encryption key>
+rem set Gateway__MaxTokenHours=12
 set Gateway__EnableSwagger=false
 cd /d "%~dp0Gateway"
 .\Mobile.Gateway.exe --urls http://0.0.0.0:91

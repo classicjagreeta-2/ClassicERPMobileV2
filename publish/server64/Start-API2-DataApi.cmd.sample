@@ -1,8 +1,13 @@
 @echo off
-rem API 2 (Mobile.DataApi) on the 64 server, port 92. Copy this file to Start-API2-DataApi.cmd and fill in the value.
-rem PRIVATE once filled in: it holds the config key - never commit it.
-rem API 2 needs no database login: the sealed config from API 1 carries the client's login.
+rem API 2 (Mobile.DataApi) on the 64 server, port 92. Copy this file to Start-API2-DataApi.cmd and fill in the values.
+rem PRIVATE once filled in: it holds the config key and the client's database login - never commit it.
+rem The phone only carries the access token from API 1; the database login stays on this server.
 set DataApi__ConfigKey=<the same text as Gateway__ConfigKey on API 1>
+set DataApi__DbService=<Oracle service name of the client database>
+set DataApi__DbUser=<client database user>
+set DataApi__DbPassword=<client database password>
+rem set DataApi__DbHost=localhost
+rem set DataApi__DbPort=1521
 set DataApi__EnableSwagger=false
 cd /d "%~dp0DataApi"
 .\Mobile.DataApi.exe --urls http://0.0.0.0:92

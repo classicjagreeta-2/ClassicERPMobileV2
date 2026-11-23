@@ -3,44 +3,44 @@
 # Do NOT commit real passwords or keys in this file.
 #
 # THE FLOW
-#   1st time : call API 1 (request 1) -> you get a sealed "config". The phone SAVES it. It holds the client's database login,
-#              encrypted: the phone cannot read it.
-#   from then: the phone calls ONLY API 2 and sends the saved config as  Authorization: Bearer <config>  (requests 2-4).
-#              API 1 is called again only when the saved config expires (about monthly).
+#   1st time : call API 1 (request 1) with the company login, password and API key -> you get "appConfig". The app SAVES it as its
+#              config file: API 2 address + end points, company details and the access token. No database connection is in it.
+#   from then: the app reads its file and calls ONLY API 2 with  Authorization: Bearer <appConfig.auth.token>  (requests 2-5).
+#              The device is validated by API 2 (request 5). API 1 is called again by the app itself when refreshAfter is reached.
 
 @api1 = http://localhost:5090
 @api2 = http://localhost:5091
 
-# The company's details (from MobileKeyManager). x-device-id is any stable id for the phone; it is registered on the first call.
+# The company's details (from MobileKeyManager); deviceId is the phone's id, checked by API 2.
 @username = <company login>
 @password = <company password>
 @apikey = <company API key>
+@appUser = <app user name>
 @deviceId = TEST1
 
 ### 0. Health check (API 1)
 GET {{api1}}/health
 
-### 1. FIRST TIME: sign in through API 1 and get the sealed config (the "config" value in the reply)
+### 1. FIRST TIME: sign in through API 1 and get appConfig
 # @name provision
 POST {{api1}}/gateway/v1/provision
 x-username: {{username}}
 x-password: {{password}}
 x-api-key: {{apikey}}
-x-device-id: {{deviceId}}
 
 ### 2. From now on only API 2: the masters this company's database says to read, in order (send request 1 first)
 GET {{api2}}/mobile/v1/plan
-Authorization: Bearer {{provision.response.body.$.config}}
+Authorization: Bearer {{provision.response.body.$.appConfig.auth.token}}
 
 ### 3. Read a master from the company's own database
 GET {{api2}}/mobile/v1/masters/division
-Authorization: Bearer {{provision.response.body.$.config}}
+Authorization: Bearer {{provision.response.body.$.appConfig.auth.token}}
 
 ### 4. Another master
 GET {{api2}}/mobile/v1/masters/tea-estate
-Authorization: Bearer {{provision.response.body.$.config}}
+Authorization: Bearer {{provision.response.body.$.appConfig.auth.token}}
 
-### 5. Device check
-GET {{api2}}/mobile/v1/auth/device-check?username={{username}}&deviceId={{deviceId}}
-Authorization: Bearer {{provision.response.body.$.config}}
-x-app-user: {{username}}
+### 5. Device check (the app user's registered device, in the customer's database)
+GET {{api2}}/mobile/v1/auth/device-check?username={{appUser}}&deviceId={{deviceId}}
+Authorization: Bearer {{provision.response.body.$.appConfig.auth.token}}
+x-app-user: {{appUser}}

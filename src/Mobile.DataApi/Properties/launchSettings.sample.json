@@ -7,6 +7,10 @@
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development",
         "DataApi__ConfigKey": "<32+ random characters, the same text as Gateway__ConfigKey>",
+        "DataApi__DbService": "<Oracle service name>",
+        "DataApi__DbUser": "<client database user>",
+        "DataApi__DbPassword": "<client database password>",
+        "DataApi__DbHost": "localhost",
         "DataApi__EnableSwagger": "true"
       },
       "applicationUrl": "http://localhost:5091"

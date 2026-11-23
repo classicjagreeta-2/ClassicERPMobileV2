@@ -3,21 +3,22 @@ using Microsoft.AspNetCore.RateLimiting;
 using Mobile.Common;
 
 // API 1 - the one central address the phone is given. Called the FIRST time (and about once a month, or when the saved config expires):
-// it checks the app login against CLASSICNEW.MOBILE_CONTROL and returns a SEALED CONFIG for the phone to save. The config holds everything API 2
-// needs to serve that company - including the client's database login - but it is encrypted and signed with a key the phone never has, so the
-// phone only carries it. From then on the phone calls the company's API 2 directly with the saved config.
+// it checks the app login against CLASSICNEW.MOBILE_CONTROL and returns "appConfig" - the JSON the app saves as its config file: the API 2
+// address and every API 2 end point, the company details, and the access token for API 2. It holds NO database connection (no host, port,
+// service, user or password): API 2 connects with the database login in its own settings. From then on the app reads its saved file and
+// calls API 2 directly.
 // Settings (environment variables preferred):
 //   Gateway__ConnectionString   Oracle connection to CLASSICNEW (reads MOBILE_CONTROL)
-//   Gateway__ConfigKey          seals the config; the SAME key is set on every API 2 (>= 32 characters)
-//   Gateway__DbPasswordKey      decrypts the client database passwords stored in MOBILE_CONTROL; shared with MobileKeyManager only (>= 32 characters)
+//   Gateway__ConfigKey          seals the access token; the SAME key is set on every API 2 (>= 32 characters)
+//   Gateway__MaxTokenHours      the longest an access token lives (default 12). The app gets a new one from API 1 by itself, so a login that is
+//                               blocked or expired in MOBILE_CONTROL loses API 2 access within this time.
 //   Gateway__Api2Scheme         http (default) | https;  Gateway__EnableSwagger  true | false
 var builder = WebApplication.CreateBuilder(args);
 builder.Host.UseWindowsService();   // runs as a Windows service when started by the service manager; an ordinary console program otherwise
 var cfg = builder.Configuration.GetSection("Gateway");
 var cs = cfg["ConnectionString"] ?? throw new InvalidOperationException("Gateway:ConnectionString is not set.");
 var sealer = new ConfigSealer(cfg["ConfigKey"] ?? "");
-var dbPwKey = cfg["DbPasswordKey"] ?? "";
-if (dbPwKey.Length < 32) throw new InvalidOperationException("Gateway:DbPasswordKey must be at least 32 characters.");
+var maxTokenHours = double.TryParse(cfg["MaxTokenHours"], System.Globalization.CultureInfo.InvariantCulture, out var mh) && mh is >= 0.25 and <= 24 * 31 ? mh : 12;
 var scheme = cfg["Api2Scheme"] is "https" ? "https" : "http";
 var repo = new ControlRepository(cs);
 
@@ -39,13 +40,15 @@ var log = app.Logger;
 
 app.MapGet("/health", () => Results.Json(new { status = "ok", service = "Mobile.Gateway" }));
 
-// POST /gateway/v1/provision   headers: x-username, x-password, x-api-key, x-device-id
+// POST /gateway/v1/provision   headers: x-username, x-password, x-api-key
+// No device id here: API 1 is the customer-level sign-in the app calls before anything else. The phone / user device is validated later
+// by API 2 against the customer's own database (GET /mobile/v1/auth/device-check).
 app.MapPost("/gateway/v1/provision", async (HttpContext c, CancellationToken ct) =>
 {
     var h = c.Request.Headers;
-    string user = h["x-username"].ToString().Trim(), pass = h["x-password"].ToString(), key = h["x-api-key"].ToString(), device = h["x-device-id"].ToString().Trim();
-    if (user.Length is 0 or > 30 || pass.Length is 0 or > 200 || key.Length is 0 or > 100 || device.Length is 0 or > 60)
-        return Results.Json(new { success = false, message = "Send x-username, x-password, x-api-key and x-device-id as headers." }, statusCode: 400);
+    string user = h["x-username"].ToString().Trim(), pass = h["x-password"].ToString(), key = h["x-api-key"].ToString();
+    if (user.Length is 0 or > 30 || pass.Length is 0 or > 200 || key.Length is 0 or > 100)
+        return Results.Json(new { success = false, message = "Send x-username, x-password and x-api-key as headers." }, statusCode: 400);
 
     const string bad = "Login, password or API key is incorrect, or the mobile access is not active.";
     var row = await repo.FindActiveByUser(user, ct);
@@ -57,50 +60,54 @@ app.MapPost("/gateway/v1/provision", async (HttpContext c, CancellationToken ct)
         log.LogWarning("Provision refused for {User} from {Ip}", user, c.Connection.RemoteIpAddress);
         return Results.Json(new { success = false, message = bad }, statusCode: 401);
     }
-    if (!await repo.BindDevice(row, device, ct))
-    {
-        log.LogWarning("Provision refused for {User}: different device", user);
-        return Results.Json(new { success = false, message = "This login is registered to another device." }, statusCode: 403);
-    }
 
-    // the client's database login must be saved for the company (MobileKeyManager -> Edit company)
-    if (string.IsNullOrWhiteSpace(row.DbUser) || string.IsNullOrEmpty(row.DbPasswordEnc))
-    {
-        log.LogError("Control {Id} ({User}) has no database login saved", row.CtrlId, user);
-        return Results.Json(new { success = false, message = "This company's database login is not set up yet. Ask the administrator." }, statusCode: 503);
-    }
-    var dbPassword = SecretBox.Decrypt(dbPwKey, row.DbPasswordEnc);
-    if (dbPassword == null)
-    {
-        log.LogError("Control {Id}: the saved database password cannot be decrypted (wrong Gateway:DbPasswordKey?)", row.CtrlId);
-        return Results.Json(new { success = false, message = "The company's database login could not be read. Ask the administrator." }, statusCode: 500);
-    }
-
-    // the config is valid until the end of the company's valid-until day (30 days when none is set); TOKEN_MINUTES > 0 can only shorten that
+    // the token lives the SHORTEST of: Gateway__MaxTokenHours, the company's TOKEN_MINUTES (> 0), the end of its valid-until day.
+    // Short on purpose: it cannot be cancelled on API 2, so a blocked login is cut off when the app next asks API 1 for a new one.
     var now = DateTimeOffset.UtcNow;
-    var expires = row.Validity != null ? new DateTimeOffset(row.Validity.Value.Date.AddDays(1)) : now.AddDays(30);
+    var expires = now.AddHours(maxTokenHours);
+    if (row.Validity != null && new DateTimeOffset(row.Validity.Value.Date.AddDays(1)) < expires) expires = new DateTimeOffset(row.Validity.Value.Date.AddDays(1));
     if (row.TokenMinutes > 0 && now.AddMinutes(row.TokenMinutes) < expires) expires = now.AddMinutes(row.TokenMinutes);
+    // refresh at 80% of the token's life, so a working app never meets an expired token
+    var refreshAfter = now + (expires - now) * 0.8;
 
-    var config = new ClientConfig
+    var token = sealer.Seal(new ClientConfig
     {
         CtrlId = row.CtrlId, Company = row.ClientName, Mode = row.Mode.ToString(), Loca = row.Loca, Unit = row.Unit, MainUnit = row.MainUnit, DocYear = row.EffectiveDocYear,
-        DbHost = string.IsNullOrWhiteSpace(row.DbHost) ? row.IpAddress : row.DbHost, DbPort = row.DatabasePort, DbService = row.DatabaseName, Schema = row.SchemaName,
-        DbUser = row.DbUser!, DbPassword = dbPassword, ConfigTable = "MOBILE_MASTER_CONFIG",
-        ValidFrom = row.ActiveDate, ValidTo = row.Validity, Iat = now.ToUnixTimeSeconds(), Exp = expires.ToUnixTimeSeconds()
-    };
+        Schema = row.SchemaName, ValidFrom = row.ActiveDate, ValidTo = row.Validity, Iat = now.ToUnixTimeSeconds(), Exp = expires.ToUnixTimeSeconds()
+    });
+    var api2 = $"{scheme}://{row.IpAddress}:{row.HostedPort}";
+    var api1 = $"{c.Request.Scheme}://{c.Request.Host}";
 
     log.LogInformation("Provisioned {User} -> control {Id} ({Mode}) config until {Exp:u}", user, row.CtrlId, row.Mode, expires);
-    // The reply shows the phone only what it needs: where API 2 is, and the sealed config to save. The database name, schema,
-    // user and password are inside the sealed config, which only API 2 can open.
-    return Results.Json(new
+    // appConfig = the file the app saves and reads on every start. API calling details only - no database connection.
+    // passwordEnc / apiKeyEnc are left empty: the app fills them with the password and API key the user typed, encrypted with the
+    // phone's own key store (API 1 only has their hashes), so it can call API 1 again by itself when refreshAfter is reached.
+    var appConfig = new
     {
-        success = true, version = 2, issuedAt = now, controlId = row.CtrlId,
-        clientName = row.ClientName, mode = row.Mode.ToString(), loca = row.Loca, unit = row.Unit,
-        api2BaseUrl = $"{scheme}://{row.IpAddress}:{row.HostedPort}/",
-        validFrom = row.ActiveDate, validTo = row.Validity,
-        refreshAfter = expires.AddDays(-3), configExpires = expires,
-        config = sealer.Seal(config)
-    });
+        version = 3, issuedAt = now,
+        userName = user, passwordEnc = "", apiKeyEnc = "",
+        controlId = row.CtrlId, clientName = row.ClientName, mode = row.Mode.ToString(), loca = row.Loca, unit = row.Unit, docYear = row.EffectiveDocYear,
+        api1 = new { baseUrl = api1, provision = "/gateway/v1/provision" },
+        api2 = new
+        {
+            baseUrl = api2,
+            endpoints = new
+            {
+                plan = "/mobile/v1/plan",
+                masters = "/mobile/v1/masters/{key}",
+                updateMaster = "/mobile/v1/masters/{key}/{id}",
+                upload = "/mobile/v1/upload/{key}",
+                faceRecognition = "/mobile/v1/face-recognition",
+                faceConsent = "/mobile/v1/face-consent",
+                importEye = "/mobile/v1/import-eye",
+                deviceCheck = "/mobile/v1/auth/device-check",
+                health = "/health"
+            }
+        },
+        auth = new { header = "Authorization", scheme = "Bearer", token, appUserHeader = "x-app-user" },
+        validFrom = row.ActiveDate, validTo = row.Validity, refreshAfter, tokenExpires = expires
+    };
+    return Results.Json(new { success = true, appConfig });
 }).RequireRateLimiting("provision");
 
 app.Run();
