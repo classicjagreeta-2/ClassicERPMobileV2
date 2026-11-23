@@ -53,9 +53,14 @@ public static class ImportEyeApi
                 var q = MasterQuery.BuildSelect(ht, ctx.Row);
                 using var hc = con.CreateCommand(); hc.BindByName = true; hc.CommandText = q.Sql;
                 foreach (var (k, v) in q.Binds) hc.Parameters.Add(k, OracleDbType.Varchar2).Value = v ?? DBNull.Value;
-                var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                using (var rd = await hc.ExecuteReaderAsync(ct)) while (await rd.ReadAsync(ct)) if (!rd.IsDBNull(0)) known.Add(rd.GetValue(0).ToString()!.Trim());
-                var bad = ImportEyeParser.UnknownHaziraCodes(rows, known);
+                var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase); var readable = true;
+                try { using var rd = await hc.ExecuteReaderAsync(ct); while (await rd.ReadAsync(ct)) if (!rd.IsDBNull(0)) known.Add(rd.GetValue(0).ToString()!.Trim()); }
+                catch (OracleException ex)   // e.g. the schema has no M_HAZIRATYPE: do not block attendance, accept the codes unchecked
+                {
+                    readable = false;
+                    log.LogWarning("IMPORT_EYE: Hazira Type master not readable for control {Id} ({Error}); hazira_code not checked", ctx.Row.CtrlId, ex.Message.Split('\n')[0]);
+                }
+                var bad = readable ? ImportEyeParser.UnknownHaziraCodes(rows, known) : new();
                 if (bad.Count > 0)
                     return Results.Json(new { success = false, message = "Nothing was saved. Fix the rows listed.", errors = bad.Select(b => new { row = b.Row, errors = new[] { b.Error } }) }, statusCode: 400);
             }
